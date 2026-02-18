@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Автоматизация обслуживания ТА</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .menu { margin-bottom: 20px; }
+        .menu button { margin-right: 10px; padding: 8px 16px; }
+        .content { border: 1px solid #ccc; padding: 20px; min-height: 400px; }
+        .hidden { display: none; }
+        .filter { margin-bottom: 15px; }
+        .calendar-view { margin-bottom: 15px; }
+        .calendar-view button { margin-right: 5px; }
+        .year-calendar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+        .month-calendar { border: 1px solid #ddd; padding: 10px; }
+        .month-header { text-align: center; font-weight: bold; margin-bottom: 10px; }
+        .week-row { display: grid; grid-template-columns: repeat(7, 1fr); margin-bottom: 5px; }
+        .day-cell { border: 1px solid #eee; padding: 5px; min-height: 60px; }
+        .ta-marker { 
+            padding: 2px 4px; 
+            margin: 1px; 
+            border-radius: 3px; 
+            font-size: 12px; 
+            cursor: pointer; 
+        }
+        .ta-info { 
+            position: absolute; 
+            background: white; 
+            border: 1px solid #ccc; 
+            padding: 10px; 
+            z-index: 100; 
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2); 
+        }
+        .schedule-table { width: 100%; border-collapse: collapse; }
+        .schedule-table th, .schedule-table td { border: 1px solid #ddd; padding: 8px; }
+        .status-new { background-color: #ffeb3b; }
+        .status-inprogress { background-color: #2196f3; color: white; }
+        .priority-high { background-color: #ff5722; color: white; }
+        .priority-medium { background-color: #ff9800; }
+        .priority-low { background-color: #4caf50; color: white; }
+    </style>
+</head>
+<body>
+    <h1>Система обслуживания Торговых Автоматов (ТА)</h1>
+    
+    <div class="menu">
+        <button onclick="showTab('ta')">ТА</button>
+        <button onclick="showTab('calendar')">Календарь обслуживания</button>
+        <button onclick="showTab('schedule')">График работ</button>
+    </div>
+
+    <div id="ta" class="content hidden">
+        <h2>Торговые автоматы</h2>
+        <div id="taList"></div>
+    </div>
+
+    <div id="calendar" class="content">
+        <h2>Календарь обслуживания</h2>
+        
+        <div class="filter">
+            <label>Режим отображения:</label>
+            <select id="viewMode" onchange="loadCalendar()">
+                <option value="all">Все ТА</option>
+                <option value="single">Один ТА</option>
+            </select>
+            
+            <span id="taFilterContainer" class="hidden">
+                <label>Выберите ТА:</label>
+                <select id="taFilter" onchange="loadCalendar()"></select>
+            </span>
+        </div>
+
+        <div class="calendar-view">
+            <button onclick="setCalendarType('week')">Неделя</button>
+            <button onclick="setCalendarType('month')">Месяц</button>
+            <button onclick="setCalendarType('year')">Год</button>
+        </div>
+
+        <div id="calendarContent"></div>
+        <div id="taTooltip" class="ta-info hidden"></div>
+    </div>
+
+    <div id="schedule" class="content hidden">
+        <h2>График работ</h2>
+        
+        <div class="filter">
+            <label>Дата:</label>
+            <input type="date" id="scheduleDate" value="2024-01-15" onchange="loadSchedule()">
+            <button onclick="generateSchedule()" style="margin-left: 20px;">Сформировать</button>
+        </div>
+
+        <div id="scheduleContent"></div>
+    </div>
+
+    <script>
+        // Модель данных
+        const db = {
+            terminalAutomats: [
+                { id: 1, model: "ТА-100", location: "ТЦ 'Атриум'", franchiser: "Франчайзер 1", status: "Работает" },
+                { id: 2, model: "ТА-200", location: "Метро 'Центральная'", franchiser: "Франчайзер 1", status: "Работает" },
+                { id: 3, model: "ТА-150", location: "Аэропорт", franchiser: "Франчайзер 2", status: "Требует обслуживания" },
+                { id: 4, model: "ТА-300", location: "Вокзал", franchiser: "Франчайзер 1", status: "Работает" }
+            ],
+            
+            maintenanceSchedule: [
+                { id: 1, taId: 1, date: "2024-01-10", type: "Плановое ТО", status: "Выполнено" },
+                { id: 2, taId: 2, date: "2024-01-15", type: "Плановое ТО", status: "Новая" },
+                { id: 3, taId: 3, date: "2024-01-15", type: "Срочный ремонт", status: "Новая" },
+                { id: 4, taId: 4, date: "2024-01-20", type: "Плановое ТО", status: "Новая" },
+                { id: 5, taId: 1, date: "2024-02-01", type: "Плановое ТО", status: "Запланировано" },
+                { id: 6, taId: 2, date: "2024-02-05", type: "Плановое ТО", status: "Запланировано" }
+            ],
+            
+            workRequests: [
+                { id: 1, maintenanceId: 2, taId: 2, date: "2024-01-15", priority: "medium", status: "Новая", employeeId: null },
+                { id: 2, maintenanceId: 3, taId: 3, date: "2024-01-15", priority: "high", status: "Новая", employeeId: null },
+                { id: 3, maintenanceId: 4, taId: 4, date: "2024-01-20", priority: "low", status: "Новая", employeeId: null }
+            ],
+            
+            employees: [
+                { id: 1, name: "Иванов И.И.", position: "Инженер" },
+                { id: 2, name: "Петров П.П.", position: "Техник" },
+                { id: 3, name: "Сидоров С.С.", position: "Инженер" }
+            ],
+            
+            workSchedule: [
+                { id: 1, date: "2024-01-15", employeeId: 1, requestId: null, task: "Свободен" },
+                { id: 2, date: "2024-01-15", employeeId: 2, requestId: null, task: "Свободен" },
+                { id: 3, date: "2024-01-15", employeeId: 3, requestId: null, task: "Свободен" }
+            ]
+        };
+
+        let currentCalendarType = 'month';
+        let tooltipVisible = false;
+
+        // Инициализация при загрузке
+        document.addEventListener('DOMContentLoaded', function() {
+            loadTAList();
+            loadCalendar();
+            loadSchedule();
+            
+            // Инициализация фильтра ТА
+            const taFilter = document.getElementById('taFilter');
+            db.terminalAutomats.forEach(ta => {
+                const option = document.createElement('option');
+                option.value = ta.id;
+                option.textContent = `${ta.model} - ${ta.location}`;
+                taFilter.appendChild(option);
+            });
+        });
+
+        function showTab(tabName) {
+            // Скрыть все вкладки
+            document.getElementById('ta').classList.add('hidden');
+            document.getElementById('calendar').classList.add('hidden');
+            document.getElementById('schedule').classList.add('hidden');
+            
+            // Показать выбранную вкладку
+            document.getElementById(tabName).classList.remove('hidden');
+            
+            // Обновить данные при переключении
+            if (tabName === 'ta') loadTAList();
+            if (tabName === 'schedule') loadSchedule();
+        }
+
+        function loadTAList() {
+            const container = document.getElementById('taList');
+            container.innerHTML = '<h3>Список торговых автоматов</h3>';
+            
+            const table = document.createElement('table');
+            table.className = 'schedule-table';
+            table.innerHTML = `
+                <tr>
+                    <th>ID</th>
+                    <th>Модель</th>
+                    <th>Место расположения</th>
+                    <th>Франчайзер</th>
+                    <th>Статус</th>
+                </tr>
+            `;
+            
+            db.terminalAutomats.forEach(ta => {
+                const row = table.insertRow();
+                row.innerHTML = `
+                    <td>${ta.id}</td>
+                    <td>${ta.model}</td>
+                    <td>${ta.location}</td>
+                    <td>${ta.franchiser}</td>
+                    <td>${ta.status}</td>
+                `;
+            });
+            
+            container.appendChild(table);
+        }
+
+        function setCalendarType(type) {
+            currentCalendarType = type;
+            loadCalendar();
+        }
+
+        function loadCalendar() {
+            const viewMode = document.getElementById('viewMode').value;
+            const taFilterContainer = document.getElementById('taFilterContainer');
+            
+            if (viewMode === 'single') {
+                taFilterContainer.classList.remove('hidden');
+            } else {
+                taFilterContainer.classList.add('hidden');
+            }
+            
+            const container = document.getElementById('calendarContent');
+            
+            switch(currentCalendarType) {
+                case 'week':
+                    renderWeekCalendar(container, viewMode);
+                    break;
+                case 'month':
+                    renderMonthCalendar(container, viewMode);
+                    break;
+                case 'year':
+                    renderYearCalendar(container, viewMode);
+                    break;
+            }
+        }
+
+        function renderWeekCalendar(container, viewMode) {
+            container.innerHTML = '<h3>Неделя 15-21 января 2024</h3>';
+            
+            const weekDays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+            const weekDates = ['2024-01-15', '2024-01-16', '2024-01-17', '2024-01-18', '2024-01-19', '2024-01-20', '2024-01-21'];
+            
+            const calendarDiv = document.createElement('div');
+            calendarDiv.className = 'week-calendar';
+            
+            weekDays.forEach((day, index) => {
+                const dayDiv = document.createElement('div');
+                dayDiv.className = 'day-cell';
+                dayDiv.innerHTML = `<strong>${day}<br>${index + 15}.01</strong>`;
+                
+                // Получение мероприятий на день
+                const dayEvents = db.maintenanceSchedule.filter(event => 
+                    event.date === weekDates[index] && 
+                    (viewMode === 'all' || event.taId == document.getElementById('taFilter').value)
+                );
+                
+                dayEvents.forEach(event => {
+                    const ta = db.terminalAutomats.find(t => t.id === event.taId);
+                    if (ta) {
+                        const marker = document.createElement('div');
+                        marker.className = 'ta-marker';
+                        marker.style.backgroundColor = getColorByTA(ta.id);
+                        marker.textContent = `${ta.model.substring(0, 5)}`;
+                        marker.title = `${ta.model} - ${ta.location}`;
+                        marker.onmouseover = (e) => showTATooltip(e, ta, event);
+                        marker.onmouseout = hideTATooltip;
+                        dayDiv.appendChild(marker);
+                    }
+                });
+                
+                calendarDiv.appendChild(dayDiv);
+            });
+            
+            container.appendChild(calendarDiv);
+        }
+
+        function renderMonthCalendar(container, viewMode) {
+            container.innerHTML = '<h3>Январь 2024</h3>';
+            
+            const monthDiv = document.createElement('div');
+            monthDiv.className = 'month-calendar';
+            
+            // Заголовки дней недели
+            const weekDays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+            const weekRow = document.createElement('div');
+            weekRow.className = 'week-row';
+            
+            weekDays.forEach(day => {
+                const dayHeader = document.createElement('div');
+                dayHeader.textContent = day;
+                dayHeader.style.fontWeight = 'bold';
+                dayHeader.style.textAlign = 'center';
+                weekRow.appendChild(dayHeader);
+            });
+            
+            monthDiv.appendChild(weekRow);
+            
+            // Дни месяца (упрощенный вариант)
+            for (let i = 1; i <= 31; i++) {
+                if (i % 7 === 1 && i > 1) {
+                    const newWeekRow = document.createElement('div');
+                    newWeekRow.className = 'week-row';
+                    monthDiv.appendChild(newWeekRow);
+                }
+                
+                const weekRows = monthDiv.getElementsByClassName('week-row');
+                const currentWeekRow = weekRows[weekRows.length - 1];
+                
+                const dayCell = document.createElement('div');
+                dayCell.className = 'day-cell';
+                dayCell.innerHTML = `<strong>${i}</strong>`;
+                
+                // Получение мероприятий на день
+                const dateStr = `2024-01-${i.toString().padStart(2, '0')}`;
+                const dayEvents = db.maintenanceSchedule.filter(event => 
+                    event.date === dateStr && 
+                    (viewMode === 'all' || event.taId == document.getElementById('taFilter').value)
+                );
+                
+                dayEvents.forEach(event => {
+                    const ta = db.terminalAutomats.find(t => t.id === event.taId);
+                    if (ta) {
+                        const marker = document.createElement('div');
+                        marker.className = 'ta-marker';
+                        marker.style.backgroundColor = getColorByTA(ta.id);
+                        marker.textContent = `${ta.model.substring(0, 3)}`;
+                        marker.title = `${ta.model} - ${ta.location}`;
+                        marker.onmouseover = (e) => showTATooltip(e, ta, event);
+                        marker.onmouseout = hideTATooltip;
+                        dayCell.appendChild(marker);
+                    }
+                });
+                
+                currentWeekRow.appendChild(dayCell);
+            }
+            
+            container.appendChild(monthDiv);
+        }
+
+        function renderYearCalendar(container, viewMode) {
+            container.innerHTML = '<h3>2024 год</h3>';
+            
+            const yearDiv = document.createElement('div');
+            yearDiv.className = 'year-calendar';
+            
+            for (let month = 1; month <= 12; month++) {
+                const monthDiv = document.createElement('div');
+                monthDiv.className = 'month-calendar';
+                
+                const monthHeader = document.createElement('div');
+                monthHeader.className = 'month-header';
+                monthHeader.textContent = getMonthName(month);
+                monthDiv.appendChild(monthHeader);
+                
+                // Простой пример - только названия месяцев
+                const monthContent = document.createElement('div');
+                monthContent.innerHTML = `<div style="text-align:center;padding:20px;">
+                    Плановых обслуживаний: ${db.maintenanceSchedule.filter(e => 
+                        new Date(e.date).getMonth() + 1 === month && 
+                        (viewMode === 'all' || e.taId == document.getElementById('taFilter').value)
+                    ).length}
+                </div>`;
+                
+                monthDiv.appendChild(monthContent);
+                yearDiv.appendChild(monthDiv);
+            }
+            
+            container.appendChild(yearDiv);
+        }
+
+        function getMonthName(month) {
+            const months = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 
+                          'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+            return months[month - 1];
+        }
+
+        function getColorByTA(taId) {
+            const colors = ['#FF9999', '#99FF99', '#9999FF', '#FFFF99', '#FF99FF', '#99FFFF'];
+            return colors[taId % colors.length];
+        }
+
+        function showTATooltip(event, ta, maintenance) {
+            const tooltip = document.getElementById('taTooltip');
+            tooltip.innerHTML = `
+                <strong>Торговый автомат #${ta.id}</strong><br>
+                Модель: ${ta.model}<br>
+                Место: ${ta.location}<br>
+                Франчайзер: ${ta.franchiser}<br>
+                Обслуживание: ${maintenance.type}<br>
+                Дата: ${maintenance.date}<br>
+                Статус: ${maintenance.status}
+            `;
+            
+            tooltip.style.left = (event.pageX + 10) + 'px';
+            tooltip.style.top = (event.pageY + 10) + 'px';
+            tooltip.classList.remove('hidden');
+            tooltipVisible = true;
+        }
+
+        function hideTATooltip() {
+            setTimeout(() => {
+                if (tooltipVisible) {
+                    const tooltip = document.getElementById('taTooltip');
+                    tooltip.classList.add('hidden');
+                    tooltipVisible = false;
+                }
+            }, 100);
+        }
+
+        function loadSchedule() {
+            const date = document.getElementById('scheduleDate').value;
+            const container = document.getElementById('scheduleContent');
+            
+            // Фильтрация заявок на выбранную дату
+            const dayRequests = db.workRequests.filter(req => req.date === date);
+            const daySchedule = db.workSchedule.filter(sched => sched.date === date);
+            
+            container.innerHTML = `
+                <h3>Расписание на ${date}</h3>
+                <p>Заявки на обслуживание:</p>
+            `;
+            
+            // Таблица заявок
+            const requestsTable = document.createElement('table');
+            requestsTable.className = 'schedule-table';
+            requestsTable.innerHTML = `
+                <tr>
+                    <th>ID заявки</th>
+                    <th>ТА</th>
+                    <th>Тип обслуживания</th>
+                    <th>Приоритет</th>
+                    <th>Статус</th>
+                    <th>Сотрудник</th>
+                </tr>
+            `;
+            
+            dayRequests.forEach(request => {
+                const ta = db.terminalAutomats.find(t => t.id === request.taId);
+                const maintenance = db.maintenanceSchedule.find(m => m.id === request.maintenanceId);
+                const employee = db.employees.find(e => e.id === request.employeeId);
+                
+                const row = requestsTable.insertRow();
+                row.className = `priority-${request.priority}`;
+                row.innerHTML = `
+                    <td>${request.id}</td>
+                    <td>${ta ? ta.model : 'N/A'}</td>
+                    <td>${maintenance ? maintenance.type : 'N/A'}</td>
+                    <td>
+                        <select onchange="changePriority(${request.id}, this.value)">
+                            <option value="low" ${request.priority === 'low' ? 'selected' : ''}>Низкий</option>
+                            <option value="medium" ${request.priority === 'medium' ? 'selected' : ''}>Средний</option>
+                            <option value="high" ${request.priority === 'high' ? 'selected' : ''}>Высокий</option>
+                        </select>
+                    </td>
+                    <td class="status-${request.status === 'Новая' ? 'new' : 'inprogress'}">${request.status}</td>
+                    <td>
+                        <select onchange="assignEmployee(${request.id}, this.value)">
+                            <option value="">Не назначен</option>
+                            ${db.employees.map(emp => 
+                                `<option value="${emp.id}" ${request.employeeId === emp.id ? 'selected' : ''}>
+                                    ${emp.name}
+                                </option>`
+                            ).join('')}
+                        </select>
+                    </td>
+                `;
+            });
+            
+            container.appendChild(requestsTable);
+            
+            // Расписание сотрудников
+            container.innerHTML += `<p style="margin-top:20px;">Расписание сотрудников:</p>`;
+            
+            const scheduleTable = document.createElement('table');
+            scheduleTable.className = 'schedule-table';
+            scheduleTable.innerHTML = `
+                <tr>
+                    <th>Сотрудник</th>
+                    <th>Должность</th>
+                    <th>Задание</th>
+                    <th>Статус</th>
+                </tr>
+            `;
+            
+            daySchedule.forEach(schedule => {
+                const employee = db.employees.find(e => e.id === schedule.employeeId);
+                const request = schedule.requestId ? 
+                    db.workRequests.find(r => r.id === schedule.requestId) : null;
+                const ta = request ? db.terminalAutomats.find(t => t.id === request.taId) : null;
+                
+                const row = scheduleTable.insertRow();
+                row.innerHTML = `
+                    <td>${employee ? employee.name : 'N/A'}</td>
+                    <td>${employee ? employee.position : 'N/A'}</td>
+                    <td>${request && ta ? `Обслуживание ${ta.model} (${ta.location})` : schedule.task}</td>
+                    <td>${request ? request.status : 'Свободен'}</td>
+                `;
+            });
+            
+            container.appendChild(scheduleTable);
+        }
+
+        function changePriority(requestId, priority) {
+            const request = db.workRequests.find(r => r.id === requestId);
+            if (request) {
+                request.priority = priority;
+                console.log(`Приоритет заявки ${requestId} изменен на ${priority}`);
+            }
+        }
+
+        function assignEmployee(requestId, employeeId) {
+            const request = db.workRequests.find(r => r.id === requestId);
+            if (request) {
+                request.employeeId = employeeId ? parseInt(employeeId) : null;
+                
+                // Обновление расписания сотрудника
+                const schedule = db.workSchedule.find(s => 
+                    s.date === request.date && s.employeeId === request.employeeId
+                );
+                
+                if (schedule) {
+                    schedule.requestId = requestId;
+                    schedule.task = `Обслуживание ТА ${request.taId}`;
+                }
+                
+                console.log(`Заявка ${requestId} назначена сотруднику ${employeeId}`);
+            }
+        }
+
+        function generateSchedule() {
+            // Обновление статусов заявок
+            db.workRequests.forEach(request => {
+                if (request.employeeId && request.status === 'Новая') {
+                    request.status = 'В работе';
+                    
+                    // Обновление статуса оборудования
+                    const ta = db.terminalAutomats.find(t => t.id === request.taId);
+                    if (ta) {
+                        ta.status = 'В ремонте/на обслуживании';
+                    }
+                }
+            });
+            
+            alert('Расписание сформировано! Статусы обновлены.');
+            loadSchedule();
+            loadTAList();
+        }
+    </script>
+</body>
+</html>

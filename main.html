@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<style>
+    table, th, td{
+        table-layout: fixed;
+        border: 0.5px solid black;
+        width: 100px;
+        height: 150px;
+    }
+</style>
+<body>
+    <div id="menu">
+        <button onclick="render_ta()">ТА</button>
+        <button onclick="render_work()">График работ</button>
+        <button onclick="render_calendar()">Календарь</button>
+    </div>
+
+    <div id="ta"></div>
+
+    <div id="work_graph"></div>
+
+    <div id="calendar"></div>
+
+
+    <script>;
+        function render_ta(){
+            document.getElementById("calendar").innerHTML = ""
+            document.getElementById("work_graph").innerHTML = ""
+
+            const ta = document.getElementById("ta")
+            ta.innerHTML =
+                `<input type="file" id="parse_csv">
+                <button onclick="upload_table()">СПЕНИСИТЬ</button>
+                <div id="ta_table">
+                </div>`
+        }
+
+        function render_work(){
+            document.getElementById("ta").innerHTML = ""
+            document.getElementById("calendar").innerHTML = ""
+
+            const work = document.getElementById("work_graph")
+            work.innerHTML =
+            `<div id="employers"></div>
+            <div id="fix_machines"></div>`
+
+            upload_work()
+        }
+
+        function render_calendar(){
+            document.getElementById("ta").innerHTML = ""
+            document.getElementById("work_graph").innerHTML = ""
+
+            const calendar = document.getElementById("calendar")
+            calendar.innerHTML =
+            `<input type="date" id="calend_field">
+            <button onclick="upload_calendar(1)">месяц</button>
+            <div id="calendar_table">
+            </div>`
+        }
+
+
+        async function upload_work(){
+            let e_table = `<table>`
+            let f_table = `<table>`
+
+            const empl_div = document.getElementById("employers")
+            const fix_div = document.getElementById("fix_machines")
+
+            let employers = await fetch("http://localhost:8000/employers", {"method": "GET"})
+            let fix_machines = await fetch("http://localhost:8000/fixes", {"method": "GET"})
+
+            const empl_dict = await employers.json()
+            const machines_dct = await fix_machines.json()
+
+            for (let i=0; i<Object.keys(machines_dct).length; i++){
+                let machine = machines_dct[i]
+                f_table +=
+                `<tr>
+                    <td>${machine.machine}</td>
+                    <td>${machine.machine_serial}</td>
+                    <td>${machine.description}</td>
+                    <td>${machine.problem}</td>
+                    <td>${machine.employer}</td>
+                </tr>`
+            }
+            f_table += `</table>`
+
+            for (let i=0; i<Object.keys(empl_dict).length; i++){
+                let employer = empl_dict[i]
+                e_table +=
+                `<tr>
+                    <td>${employer.first_name}</td>
+                    <td>${employer.last_name}</td>
+                    <td>${employer.mid_name}</td>
+                    <td>${employer.email}</td>
+                    <td>${employer.phone}</td>
+                    <td>${employer.role}</td>
+                    <td>${employer.status}</td>
+                </tr>`
+            }
+            e_table += `</table>`
+
+            fix_div.innerHTML = f_table
+            empl_div.innerHTML = e_table
+        }
+
+        async function upload_calendar(mode){
+            const lst = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+            let calend_field = "<table><tr>"
+
+            let calend_div = document.getElementById("calendar_table")
+            let date = document.getElementById("calend_field").value
+            date = lst[date.split("-")[mode] - 1]
+
+            const api_machine = await fetch("http://localhost:8000/get", {"method": "get"})
+            const data = await api_machine.json()
+            const machines_mounth = {}
+
+            for (let i=0; i<Object.keys(data).length; i++){
+                machines_mounth[Number(data[i]["next_fix_date"].split("-")[2])] = data[i]
+            }
+
+            for (let i=1; i <= date; i++){
+                if (machines_mounth[i]){
+                    calend_field +=
+                    `<td>${machines_mounth[i]["id"]}<br>
+                    ${machines_mounth[i]["name"]}<br>
+                    ${machines_mounth[i]["model"]}<br>
+                    ${machines_mounth[i]["modem"]}<br>
+                    ${machines_mounth[i]["company"]}<br>
+                    ${machines_mounth[i]["adress"]}</td>`
+                }
+
+                else{
+                    calend_field += `<td>${i}</td>`
+                }
+
+                if (i % 7 === 0){
+                    calend_field += "</tr><tr>"
+                }
+            }
+            calend_field += "</tr></table>"
+            calend_div.innerHTML = calend_field
+        }
+
+        async function upload_table (){
+            let table = '<table>'
+            const file_data = document.getElementById("parse_csv")
+            let text_element = document.getElementById("ta_table")
+
+            const data = file_data.files[0]
+            const ev = await data.text()
+            let lines = ev.replace("\r", "").split("\n")
+
+            for (let i = 0; i<lines.length; i++){
+                let string = lines[i].split(",")
+                table += 
+                    `<tr>
+                        <td>${string[0]}</td>
+                        <td>${string[1]}</td>
+                        <td>${string[2]}</td>
+                        <td>${string[3]}</td>
+                        <td>${string[4]}</td>
+                        <td>${string[5]}</td>
+                    </tr>`
+            }
+            table += `</table>`
+            text_element.innerHTML = table
+        }
+    </script>
+</body>
+</html>
