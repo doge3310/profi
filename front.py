@@ -1,9 +1,9 @@
 from tkinter import Tk, ttk
 import tkinter as tk
 from math import cos, sin
-from db_init import VendMachine, Employer, Modem, Operator, Role
 from hasher import verify
 from datetime import datetime
+from requests import get, post
 
 
 class Main(tk.Frame):
@@ -128,8 +128,8 @@ class Main(tk.Frame):
             self.lab = tk.Label(self.main_frame, text=item)
             self.lab.place(x=720, y=270 + ((index + 1) * xStep))
 
-        self.username_label.config(text=self.user.first_name)
-        self.role_label.config(text=self.user.role)
+        self.username_label.config(text=self.user["first_name"])
+        self.role_label.config(text=self.user["role"])
 
         self.name.place(x=0, y=0)
         self.net_efficient.place(x=50, y=50, width=300, height=200)
@@ -148,7 +148,7 @@ class Main(tk.Frame):
     def profile(self):
         self.clear_main()
 
-        self.user_label = tk.Label(self.main_frame, text="\n".join([self.user.email, self.user.phone, self.user.first_name, self.user.last_name, Role.get_by_id(self.user.role).name]))
+        self.user_label = tk.Label(self.main_frame, text="\n".join([self.user["email"], self.user["phone"], self.user["first_name"], self.user["last_name"], self.user["role"]]))
 
         self.user_label.place(x=10, y=10)
 
@@ -187,9 +187,11 @@ class Main(tk.Frame):
         self.add_vend_machine()
 
     def add_vend_machine(self):
-        lst = VendMachine.select()
+        lst = get("http://localhost:8000/get").json()
+
         for i in lst:
-            self.table.insert("", tk.END, values=[i.id, i.name, i.model, i.firm, i.modem, i.adress, i.date_expluatation])
+            i = lst[i]
+            self.table.insert("", tk.END, values=[i["id"], i["name"], i["model"], i["firm"], i["modem"], i["adress"], i["date_expluatation"]])
 
     def create_machine(self):
         self.clear_main()
@@ -262,41 +264,45 @@ class Main(tk.Frame):
         self.dell.place(x=1000, y=500, width=80, height=20)
 
     def create_vend_machine(self):
-        data = []
+        index = 0
+        data = {}
+        lst = ["name",
+               "firm",
+               "model",
+               "status",
+               "adress",
+               "place",
+               "coordinates",
+               "ser_num",
+               "work_time",
+               "time_zone",
+               "product_matrix",
+               "krit_sample",
+               "push_sample",
+               "client",
+               "manager",
+               "enginer",
+               "operator",
+               "pay_system",
+               "service_card",
+               "incas_card",
+               "download_card",
+               "kit_id",
+               "service_prior",
+               "modem"]
 
-        for i in self.create_list:
+        for item in self.create_list:
             try:
-                data.append(i.get())
+                if item.get() == "":
+                    continue
+
+                data[lst[index]] = item.get()
+                index += 1
 
             except AttributeError:
                 pass
 
-        VendMachine.get_or_create(
-            name=data[0],
-            firm=data[1],
-            model=data[2],
-            status=data[3],
-            adress=data[6],
-            place=data[7],
-            coordinates=data[8],
-            ser_num=data[9],
-            work_time=data[10],
-            time_zone=data[11],
-            product_matrix=data[12],
-            krit_sample=data[13],
-            push_sample=data[14],
-            client=data[15],
-            manager=data[16],
-            enginer=data[17],
-            operator=data[18],
-            pay_system=data[19],
-            service_card=data[20],
-            incas_card=data[21],
-            download_card=data[22],
-            kit_id=data[23],
-            service_prior=data[24],
-            modem=data[25]
-        )
+        post("http://localhost:8000/machine_insert", json=data)
 
     def ta_monitor(self):
         self.clear_main()
@@ -361,11 +367,13 @@ class Main(tk.Frame):
         self.ta_insert()
 
     def ta_insert(self):
-        lst = VendMachine.select()
+        lst = get("http://localhost:8000/get").json()
+
         for i in lst:
-            modem = Modem.get_by_id(i.modem)
-            operator = Operator.get_by_id(modem.operator)
-            self.ta_table.insert("", tk.END, values=["\n".join([i.adress, i.place, i.invent_num]), "\n".join([operator.name, str(datetime.utcnow())]), modem.load, i.money])
+            i = lst[i]
+
+            self.ta_table.insert("", tk.END, values=["\n".join([i["adress"], i["place"], i["invent_num"]]),
+                                                     "\n".join([i["name"], str(datetime.utcnow())]), i["load"], i["money"]])
 
     def authentification(self, _=None):
         self.clear_main()
@@ -379,9 +387,9 @@ class Main(tk.Frame):
         accept_button.place(x=200, y=90)
 
     def render_main(self):
-        self.user = Employer.get_or_none(email=self.email.get())
+        self.user = get(f"http://localhost:8000/user/{self.email.get()}").json()
 
-        if verify(self.password.get(), self.user.password):
+        if verify(self.password.get(), self.user["password"]):
             self.main_window()
             self.administr_list.bind("<<ComboboxSelected>>", self.choice)
 
